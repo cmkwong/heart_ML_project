@@ -1,5 +1,6 @@
 import numpy as np
 import collections
+import random
 
 output = collections.namedtuple('output', field_names=['conditions', 'data', 'target'])
 output.conditions = []
@@ -13,9 +14,9 @@ class TF_condition:
         self.description = str(feature)
 
     def judge(self, x):
-        if x:
+        if x[self.c_index]:
             return True
-        elif not x:
+        elif not x[self.c_index]:
             return False
 
     def cell_split(self, data_arr, target_col):
@@ -37,9 +38,9 @@ class numeric_condition:
         self.description = str(feature) + " < " + str(k_value)
 
     def judge(self, x):
-        if x <= self.k_value:
+        if x[self.c_index] <= self.k_value:
             return True
-        elif x > self.k_value:
+        elif x[self.c_index] > self.k_value:
             return False
 
     def cell_split(self, data_arr, target_col):
@@ -61,7 +62,7 @@ class MC_condition:
         self.description = str(feature) + " in " + str(k_values)
 
     def judge(self, x):
-        if x in self.k_values:
+        if x[self.c_index] in self.k_values:
             return True
         else:
             return False
@@ -92,9 +93,9 @@ class rank_condition:
         self.description = str(feature) + " < " + k_value
 
     def judge(self, x):
-        if x <= self.k_value:
+        if x[self.c_index] <= self.k_value:
             return True
-        elif x > self.k_value:
+        elif x[self.c_index] > self.k_value:
             return False
 
     def cell_split(self, data_arr, target_col):
@@ -112,6 +113,7 @@ class DecisionTree:
     def __init__(self, tolerance, max_layer=100):
         self.tolerance = tolerance
         self.max_layer = max_layer
+        self.num_layer = 0
 
     def info_gain(self, parent_entropy, children_entropy):
         return parent_entropy - children_entropy
@@ -122,6 +124,18 @@ class DecisionTree:
         for a in arr_col:
             element_set.add(a)
         return element_set
+
+    def num2label(self, arr_col):
+        arr_col.reshape(arr_col.shape[0], )
+        label_arr_col = np.empty(arr_col.shape, dtype=str)
+        labels_sample = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z']
+        element_set = self.get_set(arr_col)
+        for i, element in enumerate(element_set):
+            label = labels_sample[i]
+            for ii, value in enumerate(arr_col):
+                if value == element:
+                    label_arr_col[ii] = label
+        return label_arr_col
 
     def calc_cell_entropy(self, arr_col):
         arr_col.reshape(arr_col.shape[0],)
@@ -219,77 +233,20 @@ class DecisionTree:
                 return "done", label
         return "notdone", None
 
-    # def tree_wrapper(self, id, left_data_arr, right_data_arr, left_cell, right_cell, condition):
-    #     tree = {id: {}}
-    #     tree[id]["condition"] = condition
-    #     tree[id]["left"] = left_cell
-    #     tree[id]["right"] = right_cell
-    #     tree[id]["left_data"] = left_data_arr
-    #     tree[id]["right_data"] = right_data_arr
-    #     return tree
-
-    # def cell_wrapper(self, cell_id, data_arr, target, condition):
-    #     cell_dict = {cell_id: {}}
-    #     cell_dict[cell_id]["condition"] = condition
-    #     cell_dict[cell_id]["data"] = data_arr
-    #     cell_dict[cell_id]["target"] = target
-
-    # def merge_tree(self, mother_tree, mother_id, tree_label, direction='l'):
-    #     d = None
-    #     if direction == 'l':
-    #         d = "left"
-    #     elif direction == 'r':
-    #         d = "right"
-    #     mother_tree[mother_id][d] = tree_label
-    #     merged_tree = mother_tree.copy()
-    #     return merged_tree
-    #
-    # def append_node_list(self, mother_id, direction, arr_col, node_list):
-    #     # LR_cell = tree[id]["left"]
-    #     cell = {"id": mother_id, "direction": direction}
-    #     cell_done = self.cell_satisfied(arr_col)
-    #     if cell_done == False:
-    #         node_list.append(cell)
-    #     return node_list
-
-    # def build_tree(self, conditions, data_arr, target_col):
-    #     target_col.reshape(target_col.shape[0], )
-    #     parent_entropy = self.calc_cell_entropy(target_col)
-    #     best_info_gain = 0
-    #     best_index = None
-    #     best_condition = None
-    #     left_cell, right_cell, l_index, r_index = None, None, None, None
-    #     best_left_cell, best_right_cell, best_l_index, best_r_index = None, None, None, None
-    #     for i, condition in enumerate(conditions):
-    #         left_cell, right_cell, l_index, r_index = condition.cell_split(data_arr, target_col)
-    #         childs_entropy = self.calc_childs_entropy([left_cell, right_cell])
-    #         info_gain = self.info_gain(parent_entropy, childs_entropy)
-    #         if info_gain > best_info_gain:
-    #             best_left_cell, best_right_cell, best_l_index, best_r_index = left_cell, right_cell, l_index, r_index
-    #             best_info_gain = info_gain
-    #             best_index = i
-    #             best_condition = condition
-    #     # del conditions[best_index]
-    #     tree = {best_condition: {}}
-    #     l_label = self.cell_satisfied(best_left_cell)
-    #     if l_label == False:
-    #         new_data_arr = data_arr[best_l_index, :]
-    #         new_target_col = target_col[best_l_index]
-    #         tree[best_condition]["left"] = self.build_tree(conditions, new_data_arr, new_target_col)
-    #     elif l_label != False:
-    #         tree[best_condition]["left"] = l_label
-    #         return tree
-    #
-    #     r_label = self.cell_satisfied(best_right_cell)
-    #     if r_label == False:
-    #         new_data_arr = data_arr[best_r_index, :]
-    #         new_target_col = target_col[best_r_index]
-    #         tree[best_condition]["right"] = self.build_tree(conditions, new_data_arr, new_target_col)
-    #     elif r_label != False:
-    #         tree[best_condition]["right"] = r_label
-    #         return tree
-    #     print("A tree build: ", tree)
-    #     return tree
+    def dominant_label(self, arr_col):
+        arr_col.reshape(arr_col.shape[0], )
+        element_set = self.get_set(arr_col)
+        total = arr_col.shape[0]
+        labels = []
+        max_percentage = 0
+        for label in element_set:
+            percentage = np.sum(arr_col == label) / total
+            if percentage >= max_percentage:
+                max_percentage = percentage
+                labels.append(label)
+        # in case there has several dominant labels
+        index = random.randint(0, len(labels))
+        return labels[index]
 
     def overall_cells_split(self, conditions, data_arr, target_col):
         child_cells = collections.namedtuple("child_cells", field_names=["l_data", "r_data", "l_cell", "r_cell", "condition"])
@@ -320,93 +277,34 @@ class DecisionTree:
 
     def build_tree(self, conditions, data_arr, target_col):
 
-        # if len(target_col) == 3:
-        #     if np.sum((target_col == np.array([0,0,0]))) ==3 :
-        #         print("stop")
-        tree = None
+        self.num_layer = self.num_layer + 1
+        show_tree, prod_tree = None, None
         status, label = self.cell_satisfied(target_col)
+
+        # when reach the max number of layer, find the dominant label
+        if self.num_layer > self.max_layer:
+            label = self.dominant_label(target_col)
+            status = "done"
+
         if status == "notdone":
             # split the cell
             child_cells = self.overall_cells_split(conditions, data_arr, target_col)
 
             # init_tree
-            tree = {child_cells.condition.description: {}}
+            show_tree = {child_cells.condition.description: {}}
+            prod_tree = {child_cells.condition: {}}
 
-            tree[child_cells.condition.description]["True"] = self.build_tree(conditions, child_cells.l_data, child_cells.l_cell)
-            tree[child_cells.condition.description]["False"] = self.build_tree(conditions, child_cells.r_data, child_cells.r_cell)
+            show_tree[child_cells.condition.description]["True"], prod_tree[child_cells.condition][True] = self.build_tree(conditions, child_cells.l_data, child_cells.l_cell)
+            show_tree[child_cells.condition.description]["False"], prod_tree[child_cells.condition][False] = self.build_tree(conditions, child_cells.r_data, child_cells.r_cell)
         elif status == "done":
-            return label
-        return tree
+            self.num_layer = 0
+            return label, label
+        return show_tree, prod_tree
 
-    # def build_tree_(self, conditions, data_arr, target_col):
-    #     id = 0
-    #     mother_tree = {id: {}}
-    #
-    #     # looping each layer
-    #     for layer in np.arange(self.max_layer):
-    #
-    #         # looping each cell for each layer
-    #         num_mother = 2 ** layer
-    #         mother_ids = []
-    #         child_cells = []
-    #         trees = []
-    #         for c in np.arange(num_mother):
-    #             child_cells.append(self.overall_cells_split(conditions, data_arr, target_col))
-    #             trees.append(self.tree_wrapper(id, child_cells[c].l_data, child_cells[c].r_data, child_cells[c].l_cell,
-    #                                              child_cells[c].r_cell, child_cells[c].condition))
-    #             mother_ids.append(id)
-    #             id = id + 1
-    #         for i, mother_id in enumerate(mother_ids):
-    #             # mother_tree, mother_id, tree_label, direction = 'l'
-    #             mother_tree = self.merge_tree(mother_tree, mother_id, trees[i], )
-    #     return None
-    #
-    # def build_tree_2(self, conditions, data_arr, target_col):
-    #     id = 0
-    #     mother_ids = []
-    #     current_child_cell = []
-    #     current_child_cell.append(self.overall_cells_split(conditions, data_arr, target_col))
-    #     mother_tree = self.tree_wrapper(id, current_child_cell[0].l_data, current_child_cell[0].r_data, current_child_cell[0].l_cell,
-    #                                              current_child_cell[0].r_cell, current_child_cell[0].condition)
-    #     # looping each layer
-    #     for layer in np.arange(1, self.max_layer):
-    #         num_mother = 2 ** (layer-1)
-    #
-    #         # update mother tree
-    #         for c in np.arange(num_mother):
-    #             left_done = self.cell_satisfied(mother_tree[id]["left"])
-    #             if left_done == False:
-    #                 self.overall_cells_split(conditions, data_arr, target_col)
-    #             reft_done = self.cell_satisfied(mother_tree[id]["right"])
-    #     pass
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        #     mother_ids = []
-        #     next_child_cells = []
-        #     next_trees = []
-        #     for c in np.arange(num_mother):
-        #         next_child_cells.append(self.overall_cells_split(conditions, current_child_cell[c].l_data, current_child_cell[c].l_cell))
-        #         next_child_cells.append(self.overall_cells_split(conditions, current_child_cell[c].r_data, current_child_cell[c].r_cell))
-        #         next_trees.append(self.tree_wrapper(id, next_child_cells[c].l_data, next_child_cells[c].r_data, next_child_cells[c].l_cell,
-        #                                          next_child_cells[c].r_cell, next_child_cells[c].condition))
-        #         mother_ids.append(id)
-        #         id = id + 1
-        #     for i, mother_id in enumerate(mother_ids):
-        #         # mother_tree, mother_id, tree_label, direction = 'l'
-        #         mother_tree = self.merge_tree(mother_tree, mother_id, trees[i], )
-        # return None
-
+    def calc_acc(self, predicted, target):
+        predicted.reshape(predicted.shape[0], )
+        target.reshape(target.shape[0], )
+        total = predicted.shape[0]
+        return (np.sum(predicted == target) / total) * 100
 
 

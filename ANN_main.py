@@ -1,5 +1,4 @@
 from lib import data, model, common
-from torch import nn
 from torch import optim
 from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
@@ -34,7 +33,7 @@ arr = data.df2array(df_normalised)
 arr_shuffled = data.shuffle(arr)
 
 # get the training and testing set
-train_set, test_set = data.split_data(arr_shuffled, percentage=0.7)
+train_set, test_set = data.split_data(arr_shuffled, percentage=0.8)
 
 # define the net
 net = model.simple_net(input_size=13)

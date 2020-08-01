@@ -115,6 +115,12 @@ class DecisionTree:
         self.max_layer = max_layer
         self.num_layer = 0
 
+    def drop_variables(self, conditions, total_variables_num):
+        raise NotImplementedError("override drop_variables")
+
+    def drop_variables_p(self, conditions):
+        raise NotImplementedError("override drop_variables")
+
     def info_gain(self, parent_entropy, children_entropy):
         return parent_entropy - children_entropy
 
@@ -226,11 +232,17 @@ class DecisionTree:
         arr_col.reshape(arr_col.shape[0], )
         element_set = self.get_set(arr_col)
         total = arr_col.shape[0]
+        # percentages = []
+        labels = []
         for label in element_set:
             percentage = np.sum(arr_col == label) / total
-            # return if element percentage over (1-tolerance)
             if percentage >= (1-self.tolerance):
-                return "done", label
+                # percentages.append(np.sum(arr_col == label) / total)
+                labels.append(label)
+        if len(labels) > 0:
+            # in case there has several dominant labels
+            index = random.randint(0, len(labels)-1)
+            return "done", labels[index]
         return "notdone", None
 
     def dominant_label(self, arr_col):
@@ -245,7 +257,7 @@ class DecisionTree:
                 max_percentage = percentage
                 labels.append(label)
         # in case there has several dominant labels
-        index = random.randint(0, len(labels))
+        index = random.randint(0, len(labels)-1)
         return labels[index]
 
     def overall_cells_split(self, conditions, data_arr, target_col):
@@ -275,7 +287,7 @@ class DecisionTree:
         child_cells.condition = best_condition
         return child_cells
 
-    def build_tree(self, conditions, data_arr, target_col):
+    def build_tree(self, conditions, data_arr, target_col, drop_variable_each_step=False):
 
         self.num_layer = self.num_layer + 1
         show_tree, prod_tree = None, None
@@ -288,6 +300,9 @@ class DecisionTree:
 
         if status == "notdone":
             # split the cell
+            if drop_variable_each_step:
+                # conditions = self.drop_variables(conditions, data_arr.shape[1])
+                conditions = self.drop_variables_p(conditions)
             child_cells = self.overall_cells_split(conditions, data_arr, target_col)
 
             # init_tree
@@ -301,10 +316,91 @@ class DecisionTree:
             return label, label
         return show_tree, prod_tree
 
+    def predict(self, row_data_arr, prod_tree):
+        row_data_arr.reshape(row_data_arr.shape[0], )
+        while(True):
+            condition = list(prod_tree.keys())[0]
+            selection = condition.judge(row_data_arr)
+            prod_tree = prod_tree[condition][selection]
+            if type(prod_tree) is not dict:
+                predicted_label = prod_tree  # it is label, if it is not a dict
+                return predicted_label
+
     def calc_acc(self, predicted, target):
         predicted.reshape(predicted.shape[0], )
         target.reshape(target.shape[0], )
         total = predicted.shape[0]
         return (np.sum(predicted == target) / total) * 100
+
+class RandomForest(DecisionTree):
+    def __init__(self, tolerance, num_col_blocked_each_step, keep_probability):
+        super(RandomForest, self).__init__(tolerance)
+        self.num_col_blocked_each_step = num_col_blocked_each_step
+        self.keep_probability = keep_probability
+
+    def bootstrap_data(self, data_arr, OOB_percentage):
+        data_length = data_arr.shape[0]
+        OOB_total = int(data_length * OOB_percentage)
+        # draw OOB out of the data array
+        OOB_index = random.sample(range(0, data_length), OOB_total)
+
+        # build the data arr index
+        bootstrap_index = []
+        for i in np.arange(data_length):
+            if not (i in OOB_index):
+                bootstrap_index.append(i)
+        for _ in np.arange(data_length-len(bootstrap_index)):
+            bootstrap_index.append(random.sample(bootstrap_index , 1)[0])
+
+        # get the bootstrap data arr
+        bootstrap_arr = None
+        for c, i in enumerate(bootstrap_index):
+            row_arr = data_arr[i,:].reshape(1,-1)
+            if c == 0:
+                bootstrap_arr = row_arr
+            else:
+                bootstrap_arr = np.append(bootstrap_arr, row_arr, axis=0)
+        return bootstrap_arr, OOB_index
+
+    def drop_variables(self, conditions, total_variables_num):
+        col_blocked = random.sample(range(0,total_variables_num), self.num_col_blocked_each_step)
+        conditions_available = []
+        for condition in conditions:
+            if not (condition.c_index in col_blocked):
+                conditions_available.append(condition)
+        return conditions_available
+
+    def drop_variables_p(self, conditions):
+        condition_keep = random.sample( range(0, len(conditions)),
+                                           int(len(conditions)*self.keep_probability) )
+        conditions_available = []
+        for index in np.arange(len(conditions)):
+            if index in condition_keep:
+                conditions_available.append(conditions[index])
+        return conditions_available
+
+    def OOB_tree(self, row_index, trees, OOB_indexs):
+        num_trees = len(trees)
+        trees_available = []
+        for i in np.arange(num_trees):
+            if row_index in OOB_indexs[i]:
+                trees_available.append(trees[i])
+        return trees_available
+
+    def OOB_error(self, data_arr, target_col, trees, OOB_indexs):
+        predicted_labels = []
+        for index in np.arange(data_arr.shape[0]):
+            oob_trees = self.OOB_tree(index, trees, OOB_indexs)
+            if len(oob_trees) == 0:
+                print("No OOB tree available")
+                target_col = np.delete(target_col, index, 0)
+                continue
+            oob_labels = []
+            for oob_tree in oob_trees:
+                oob_labels.append(self.predict(data_arr[index,:], oob_tree))
+            predicted_labels.append(self.dominant_label(np.array(oob_labels)))
+        return (100 - self.calc_acc(np.array(predicted_labels), target_col))
+
+
 
 

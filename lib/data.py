@@ -22,6 +22,10 @@ def shuffle(arr):
 def df2array(df):
     return df.values
 
+def array2df(arr, col_list):
+    df = pd.DataFrame(arr, columns=col_list)
+    return df
+
 def append_col(df_col, df):
     return pd.concat([df,df_col],axis=1)
 
@@ -34,3 +38,7 @@ def normalize_data(series, key):
 
 def read_csv(path):
     return pd.read_csv(path)
+
+def out_csv(path, df):
+    df.to_csv(path, index=False)
+    return True

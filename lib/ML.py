@@ -110,15 +110,18 @@ class rank_condition:
         return left_cell, rigth_cell, l_index, r_index
 
 class DecisionTree:
-    def __init__(self, tolerance, max_layer=100):
+    def __init__(self, tolerance, min_element=8, max_depth=100, associated=False):
         self.tolerance = tolerance
-        self.max_layer = max_layer
-        self.num_layer = 0
+        self.max_depth = max_depth
+        self.min_element = min_element
+        self.associated = associated
+        self.num_depth = 0
+        self.label_count = 1
 
-    def drop_variables(self, conditions, total_variables_num):
+    def randomly_drop_variables(self, conditions):
         raise NotImplementedError("override drop_variables")
 
-    def drop_variables_p(self, conditions):
+    def randomly_drop_variables_p(self, conditions):
         raise NotImplementedError("override drop_variables")
 
     def info_gain(self, parent_entropy, children_entropy):
@@ -208,6 +211,13 @@ class DecisionTree:
             rank.append(r)
         return rank
 
+    def get_variable_set(self, conditions):
+        condition_set = set()
+        for condition in conditions:
+            condition_set.add(condition.c_index)
+        variables = list(condition_set)
+        return variables, len(variables)
+
     def condition_build(self, data_array, feature_list, type_list):
         conditions = []
         for c_index in np.arange(data_array.shape[1]):
@@ -228,21 +238,53 @@ class DecisionTree:
                     conditions.append(rank_condition(feature_list[c_index], c_index,rank))
         return conditions
 
-    def cell_satisfied(self, arr_col):
+    def eliminate_variable(self, target_condition, conditions):
+        conditions_available = []
+        if self.associated:
+            variable_index = target_condition.c_index
+            for condition in conditions:
+                if condition.c_index != variable_index:
+                    conditions_available.append(condition)
+        elif not self.associated:
+            for condition in conditions:
+                if condition != target_condition:
+                    conditions_available.append(condition)
+        return conditions_available
+
+    def cell_satisfied(self, arr_col, conditions, worth2split):
+
+        # checking if any cell element is larger or equal to 1-tolerance eg. (>= 95%)
         arr_col.reshape(arr_col.shape[0], )
         element_set = self.get_set(arr_col)
         total = arr_col.shape[0]
-        # percentages = []
         labels = []
         for label in element_set:
             percentage = np.sum(arr_col == label) / total
             if percentage >= (1-self.tolerance):
-                # percentages.append(np.sum(arr_col == label) / total)
                 labels.append(label)
         if len(labels) > 0:
             # in case there has several dominant labels
             index = random.randint(0, len(labels)-1)
             return "done", labels[index]
+
+        # when reach the max number of layer, find the dominant label
+        if self.num_depth > self.max_depth:
+            label = self.dominant_label(arr_col)
+            return "done", label
+
+        # if parent entropy is smaller than what the childs do, then it is not worth to split further
+        if not worth2split:
+            label = self.dominant_label(arr_col)
+            return "done", label
+
+        # no conditions to split
+        if len(conditions) == 0:
+            label = self.dominant_label(arr_col)
+            return "done", label
+
+        if self.min_element > arr_col.shape[0]:
+            label = self.dominant_label(arr_col)
+            return "done", label
         return "notdone", None
 
     def dominant_label(self, arr_col):
@@ -261,23 +303,24 @@ class DecisionTree:
         return labels[index]
 
     def overall_cells_split(self, conditions, data_arr, target_col):
-        child_cells = collections.namedtuple("child_cells", field_names=["l_data", "r_data", "l_cell", "r_cell", "condition"])
+        child_cells = collections.namedtuple("child_cells", field_names=["l_data", "r_data", "l_cell", "r_cell", "condition", "worth2split"])
+        child_cells.worth2split = False
         target_col.reshape(target_col.shape[0], )
         # calc parent entropy
         parent_entropy = self.calc_cell_entropy(target_col)
         # init params
         best_info_gain = 0
-        best_condition = None
-        best_left_cell, best_right_cell, best_l_index, best_r_index = None, None, None, None
+        best_left_cell, best_right_cell, best_l_index, best_r_index, best_condition = None, None, None, None, None
         for i, condition in enumerate(conditions):
             left_cell, right_cell, l_index, r_index = condition.cell_split(data_arr, target_col)
             childs_entropy = self.calc_childs_entropy([left_cell, right_cell])
             info_gain = self.info_gain(parent_entropy, childs_entropy)
             # the best info gain condition
-            if info_gain > best_info_gain:
+            if info_gain > best_info_gain: # info gain is larger than 0
                 best_left_cell, best_right_cell, best_l_index, best_r_index = left_cell, right_cell, l_index, r_index
                 best_info_gain = info_gain
                 best_condition = condition
+                child_cells.worth2split = True
 
         # assign value
         child_cells.l_data = data_arr[best_l_index,:]
@@ -289,31 +332,36 @@ class DecisionTree:
 
     def build_tree(self, conditions, data_arr, target_col, drop_variable_each_step=False):
 
-        self.num_layer = self.num_layer + 1
+        self.num_depth = self.num_depth + 1
         show_tree, prod_tree = None, None
-        status, label = self.cell_satisfied(target_col)
 
-        # when reach the max number of layer, find the dominant label
-        if self.num_layer > self.max_layer:
-            label = self.dominant_label(target_col)
-            status = "done"
+        # split the cell
+        if drop_variable_each_step:
+            conditions = self.randomly_drop_variables(conditions)
+            # conditions = self.randomly_drop_variables_p(conditions)
+        child_cells = self.overall_cells_split(conditions, data_arr, target_col)
+
+        # check the cell if it can be split
+        status, label = self.cell_satisfied(target_col, conditions, child_cells.worth2split)
 
         if status == "notdone":
-            # split the cell
-            if drop_variable_each_step:
-                # conditions = self.drop_variables(conditions, data_arr.shape[1])
-                conditions = self.drop_variables_p(conditions)
-            child_cells = self.overall_cells_split(conditions, data_arr, target_col)
-
             # init_tree
-            show_tree = {child_cells.condition.description: {}}
+            cell_description = str(self.label_count) + '. ' + child_cells.condition.description + ' (' + str(data_arr.shape[0]) + ')'
+            show_tree = {cell_description: {}}
             prod_tree = {child_cells.condition: {}}
 
-            show_tree[child_cells.condition.description]["True"], prod_tree[child_cells.condition][True] = self.build_tree(conditions, child_cells.l_data, child_cells.l_cell)
-            show_tree[child_cells.condition.description]["False"], prod_tree[child_cells.condition][False] = self.build_tree(conditions, child_cells.r_data, child_cells.r_cell)
+            # eliminate the used variable associated with the condition
+            conditions = self.eliminate_variable(child_cells.condition, conditions)
+
+            # split further
+            show_tree[cell_description]["True"], prod_tree[child_cells.condition][True] = self.build_tree(conditions, child_cells.l_data, child_cells.l_cell)
+            show_tree[cell_description]["False"], prod_tree[child_cells.condition][False] = self.build_tree(conditions, child_cells.r_data, child_cells.r_cell)
+
         elif status == "done":
-            self.num_layer = 0
-            return label, label
+            self.num_depth = 0
+            view_label = str(self.label_count) + '. ' + label + ' (' + str(data_arr.shape[0]) + ')'
+            self.label_count = self.label_count + 1
+            return view_label, label
         return show_tree, prod_tree
 
     def predict(self, row_data_arr, prod_tree):
@@ -333,14 +381,15 @@ class DecisionTree:
         return (np.sum(predicted == target) / total) * 100
 
 class RandomForest(DecisionTree):
-    def __init__(self, tolerance, num_col_blocked_each_step, keep_probability):
-        super(RandomForest, self).__init__(tolerance)
+    def __init__(self, tolerance, min_element=8, max_depth=100, num_col_blocked_each_step=2, conditions_keep_prob_each_step=0.8, OOB_percentage=0.3, associated=False):
+        super(RandomForest, self).__init__(tolerance, min_element, max_depth, associated)
         self.num_col_blocked_each_step = num_col_blocked_each_step
-        self.keep_probability = keep_probability
+        self.conditions_keep_prob_each_step = conditions_keep_prob_each_step
+        self.OOB_percentage = OOB_percentage
 
-    def bootstrap_data(self, data_arr, OOB_percentage):
+    def bootstrap_data(self, data_arr):
         data_length = data_arr.shape[0]
-        OOB_total = int(data_length * OOB_percentage)
+        OOB_total = int(data_length * self.OOB_percentage)
         # draw OOB out of the data array
         OOB_index = random.sample(range(0, data_length), OOB_total)
 
@@ -362,17 +411,18 @@ class RandomForest(DecisionTree):
                 bootstrap_arr = np.append(bootstrap_arr, row_arr, axis=0)
         return bootstrap_arr, OOB_index
 
-    def drop_variables(self, conditions, total_variables_num):
-        col_blocked = random.sample(range(0,total_variables_num), self.num_col_blocked_each_step)
+    def randomly_drop_variables(self, conditions):
+        _, n_variables = self.get_variable_set(conditions)
+        col_blocked = random.sample(range(0, n_variables), self.num_col_blocked_each_step)
         conditions_available = []
         for condition in conditions:
             if not (condition.c_index in col_blocked):
                 conditions_available.append(condition)
         return conditions_available
 
-    def drop_variables_p(self, conditions):
+    def randomly_drop_variables_p(self, conditions):
         condition_keep = random.sample( range(0, len(conditions)),
-                                           int(len(conditions)*self.keep_probability) )
+                                           int(len(conditions)*self.conditions_keep_prob_each_step) )
         conditions_available = []
         for index in np.arange(len(conditions)):
             if index in condition_keep:
@@ -400,7 +450,5 @@ class RandomForest(DecisionTree):
                 oob_labels.append(self.predict(data_arr[index,:], oob_tree))
             predicted_labels.append(self.dominant_label(np.array(oob_labels)))
         return (100 - self.calc_acc(np.array(predicted_labels), target_col))
-
-
 
 
